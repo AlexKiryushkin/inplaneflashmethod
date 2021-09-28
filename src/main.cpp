@@ -17,16 +17,13 @@ namespace fs = std::filesystem;
 
 std::pair<std::vector<double>, std::vector<double>> parseCsv(const fs::path& csvPath)
 {
-    auto currentFilePath = fs::path(__FILE__);
-    currentFilePath = currentFilePath.parent_path().parent_path();
-    currentFilePath.append(csvPath.generic_string());
-
-    if (!fs::exists(currentFilePath))
+    if (!fs::exists(csvPath))
     {
-        throw std::runtime_error{ "File path at " + currentFilePath.generic_string() + " does not exists" };
+        throw std::runtime_error{ "File path at " + csvPath.generic_string() + " does not exists" };
     }
 
-    std::ifstream csvFile{ currentFilePath.generic_string() };
+    std::ifstream csvFile{ csvPath.generic_string() };
+    std::cout << "Start parsing csv file..." << std::endl;
 
     // skip first line
     std::string dummy;
@@ -44,6 +41,9 @@ std::pair<std::vector<double>, std::vector<double>> parseCsv(const fs::path& csv
         timeMoments.push_back(time);
         temperatureValues.push_back(temperature);
     }
+    std::cout << "Parsing finished." << std::endl;
+    std::cout << "Number of expeimental data points is" << timeMoments.size() << std::endl;
+    std::cout << "=====================================" << std::endl;
 
     return { std::move(timeMoments), std::move(temperatureValues) };
 }
@@ -67,37 +67,77 @@ void sparse(std::vector<double>& values, std::size_t maxSize)
     values = std::move(newValues);
 }
 
+fs::path parseInputFile(int argc, char** argv)
+{
+    if (argc != 2)
+    {
+        throw std::runtime_error{ "Incorrect number of arguments. Run the program like: ipfm --input-file=path_to_file" };
+    }
+
+    fs::path exePath{ argv[0] };
+    std::string lineArg{ argv[1] };
+
+    const auto foundIdx = lineArg.find('=');
+    std::string argName = lineArg.substr(0U, foundIdx);
+    if (argName != "--input-file")
+    {
+        throw std::runtime_error{ "Incorrect argument name. Run the program like: ipfm --input-file=path_to_file" };
+    }
+
+    std::string argValue = lineArg.substr(foundIdx + 1U);
+    if (fs::path filePath{argValue}; filePath.is_absolute())
+    {
+        if (!fs::exists(filePath))
+        {
+            throw std::runtime_error{ "There is no file at path" + filePath.generic_string() };
+        }
+
+        return argValue;
+    }
+
+    fs::path filePath = exePath.parent_path() / argValue;
+    if (!fs::exists(filePath))
+    {
+        throw std::runtime_error{ "There is no file at path" + filePath.generic_string() };
+    }
+
+    return filePath;
+}
+
 int main(int argc, char** argv)
 {
     try
     {
+        auto inputFile = parseInputFile(argc, argv);
+        std::cout << "Reading experimental data from " << inputFile.generic_string() << " file" << std::endl;
+
         auto params = ipfm::SimulationParameters{ };
         if (!ipfm::readParameters(params))
         {
             ipfm::runInteractive(params);
         }
 
-        auto [time, temperature] = parseCsv("data.csv");
-        sparse(time, 20000U);
-        sparse(temperature, 20000U);
+        auto [time, temperature] = parseCsv(inputFile.generic_string());
+        sparse(time, 10000U);
+        sparse(temperature, 10000U);
+        std::cout << "For performance reasons leave only " << time.size() << " experimental points." << std::endl;
 
         const auto sz = time.size();
         std::vector<double> smoothedTemperature(sz), tmp1(sz), tmp2(sz);
         CppLowess::TemplatedLowess<std::vector<double>, double> dlowess;
+
+        std::cout << "Start smoothing experimental data..." << std::endl;
         dlowess.lowess(time, temperature, 0.05, 0, 0.0, smoothedTemperature, tmp1, tmp2);
-        sparse(smoothedTemperature, 2000U);
-        sparse(time, 2000U);
+        std::cout << "Finished smoothing" << std::endl;
+
+        sparse(smoothedTemperature, 1000U);
+        sparse(time, 1000U);
+        std::cout << "For performance reasons leave only " << time.size() << " smoothed points." << std::endl;
 
         const auto unknownDiffusivity = ipfm::calculateUnknownDiffusivity(params, time, smoothedTemperature);
-        std::cout << "Unknown thermal diffusivity is: " << unknownDiffusivity << std::endl;
-        std::cout << "Unknown thermal conductivity is: " << unknownDiffusivity * params.cp * params.rho << std::endl;
-        
-        std::ofstream out{ "smoothed_data.csv" };
-        out.imbue( std::locale( out.getloc(), new std::numpunct_byname<char>("de_DE.utf8") ) );
-        for (std::size_t i{}; i < time.size() - 1U; ++i)
-        {
-            out << time.at(i) << ";" << smoothedTemperature.at(i) << "\n";
-        }
+        std::cout << "=================================================================\n" << std::endl;
+        std::cout << "Unknown thermal diffusivity is: " << unknownDiffusivity << " [cm^2/s]" << std::endl;
+        std::cout << "Unknown thermal conductivity is: " << unknownDiffusivity * params.cp * params.rho << " [W/(cm K)]" << std::endl;
     }
     catch(const std::exception& e)
     {

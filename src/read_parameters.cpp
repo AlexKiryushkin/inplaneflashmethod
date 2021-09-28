@@ -26,8 +26,7 @@ bool parseDouble(const std::string & str, double & value)
 
 std::string getParametersFilePath()
 {
-    fs::path currentFile{ std::string(__FILE__) };
-    currentFile = currentFile.remove_filename().parent_path().parent_path();
+    fs::path currentFile{ fs::current_path() };
     currentFile /= "parameters.txt";
 
     return currentFile.string();
@@ -37,7 +36,6 @@ bool validateParams(const ipfm::SimulationParameters& params, std::string& error
 {
     if (params.cp <= 0.0) { errorString = "specific heat is incorrect"; return false; }
     if (params.rho <= 0.0) { errorString = "density is incorrect"; return false; }
-    if (params.alpha <= 0.0) { errorString = "heat exchange parameter is incorrect"; return false; }
     if (params.R <= 0.0) { errorString = "sample radius is incorrect"; return false; }
     if (params.rv <= 0.0) { errorString = "sensor radius is incorrect"; return false; }
     if (params.ri <= 0.0) { errorString = "inner heat radius is incorrect"; return false; }
@@ -66,7 +64,6 @@ bool readParameters(SimulationParameters& params)
             return false;
         }
 
-        params.alpha = defaultAlpha();
         std::string parsedString;
         while(std::getline(inputFile, parsedString))
         {
@@ -97,10 +94,6 @@ bool readParameters(SimulationParameters& params)
             else if (fieldStr == "rho")
             {
                 params.rho = value;
-            }
-            else if (fieldStr == "alpha")
-            {
-                params.alpha = value;
             }
             else
             {

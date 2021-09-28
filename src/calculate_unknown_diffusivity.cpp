@@ -21,7 +21,6 @@ bool validateParams(const ipfm::SimulationParameters& params, std::string& error
 {
     if (params.cp <= 0.0) { errorString = "specific heat is incorrect"; return false; }
     if (params.rho <= 0.0) { errorString = "density is incorrect"; return false; }
-    if (params.alpha <= 0.0) { errorString = "heat exchange parameter is incorrect"; return false; }
     if (params.R <= 0.0) { errorString = "sample radius is incorrect"; return false; }
     if (params.rv <= 0.0) { errorString = "sensor radius is incorrect"; return false; }
     if (params.ri <= 0.0) { errorString = "inner heat radius is incorrect"; return false; }
@@ -129,7 +128,7 @@ double phi(const ipfm::SimulationParameters& params, double betta)
     return result;
 }
 
-double V(const ipfm::SimulationParameters& params, const std::vector<double>& roots, double t, double lambda)
+double V(const ipfm::SimulationParameters& params, const std::vector<double>& roots, double t, double lambda, double m)
 {
     constexpr double pi = 3.14159265358;
     const auto R = params.R;
@@ -137,7 +136,6 @@ double V(const ipfm::SimulationParameters& params, const std::vector<double>& ro
     const auto ri = params.ri;
     const auto rv = params.rv;
     const auto coeff = 4 * R * R / (ro * ro - ri * ri);
-    const auto m = params.alpha / 2 / pi / R / R / params.cp / params.rho;
 
     double value{ 1.0 };
     for (const auto root : roots)
@@ -189,28 +187,30 @@ struct my_functor : Functor<double>
                const std::vector<double> & temperatures,
                const std::vector<double> & roots,
                std::vector<double> & calculatedTemperatures)
-        : Functor<double>(1,1),
+        : Functor<double>(2,2),
             params_{ params },
             times_(times),
             temperatures_(temperatures),
             roots_(roots),
             calculatedTemperatures_(calculatedTemperatures)
         {}
-    int operator()(const Eigen::VectorXd &diffusivity, Eigen::VectorXd &residual) const
+    int operator()(const Eigen::VectorXd &params, Eigen::VectorXd &residual) const
     {
         for (std::size_t idx{}; idx < times_.size(); ++idx)
         {
-            calculatedTemperatures_.at(idx) = V(params_, roots_, times_.at(idx), diffusivity(0));
+            calculatedTemperatures_.at(idx) = V(params_, roots_, times_.at(idx), params(0), std::fabs(params(1)));
         }
         normalize(calculatedTemperatures_);
         residual(0U) = std::transform_reduce(std::begin(temperatures_),
                                              std::end(temperatures_),
                                              std::begin(calculatedTemperatures_), 0.0, std::plus{},
         [](auto lhs, auto rhs) { return (lhs - rhs) * (lhs - rhs); }) / double(temperatures_.size());
-        std::cout << "residual: " << residual(0U) << "\n";
+        residual(1U) = 0.0;
+        std::cout << "iteration: " << iteration++ << ". residual: " << residual(0U) << std::endl;
         return 0;
     }
 
+    mutable int iteration = 0;
     const ipfm::SimulationParameters& params_;
     const std::vector<double> & times_;
     const std::vector<double> & temperatures_;
@@ -238,8 +238,9 @@ double calculateUnknownDiffusivity(const SimulationParameters& params,
     temperatures.pop_back();
     normalize(temperatures);
 
-    Eigen::VectorXd diffusivity(1);
-    diffusivity(0) = 0.75;
+    Eigen::VectorXd optParams(2);
+    optParams(0) = 0.75;
+    optParams(1) = 0.5;
 
     const std::size_t nRoots = 100U;
     auto roots = findFirstKRoots(nRoots);
@@ -247,22 +248,23 @@ double calculateUnknownDiffusivity(const SimulationParameters& params,
     const my_functor functional{ params, times, temperatures, roots, calculatedTemperatures };
     Eigen::NumericalDiff<my_functor> numDiff(functional);
     Eigen::LevenbergMarquardt<Eigen::NumericalDiff<my_functor>,double> lm(numDiff);
-    lm.parameters.maxfev = 2000;
-    lm.parameters.xtol = 1.0e-10;
+    lm.parameters.maxfev = 100;
+    lm.parameters.xtol = 1.0e-4;
+    lm.parameters.ftol = 1.0e-3;
 
-    int ret = lm.minimize(diffusivity);
-    std::cout << lm.iter << std::endl;
-    std::cout << ret << std::endl;
+    std::cout << "Performs non linear optimization over a non-linear function, using a variant of the Levenberg Marquardt algorithm" << std::endl;
+    int ret = lm.minimize(optParams);
+    std::cout << "heat loss constant: " << std::fabs(optParams(1U)) << std::endl;
 
-
+    std::cout << "Writing smoothed and calculated temperature to the file temp.csv" << std::endl;
     std::ofstream outFile{ "temp.csv" };
-    outFile.imbue( std::locale( outFile.getloc(), new std::numpunct_byname<char>("de_DE.utf8") ) );
     for (std::size_t idx{}; idx < times.size(); ++idx)
     {
-        outFile << times.at(idx) << ";" << calculatedTemperatures.at(idx) << ";" << temperatures.at(idx) << "\n";
+        outFile << times.at(idx) << ";" << calculatedTemperatures.at(idx) << ";" << temperatures.at(idx) << std::endl;
     }
+    std::cout << "Finished writing" << std::endl;
 
-    return diffusivity(0);
+    return optParams(0);
 }
 
 } // namespace ipfm

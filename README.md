@@ -34,6 +34,20 @@ Untitled_Time;Untitled
 ```
 Sample files are located in data folder of the repository.
 
+## Parameters
+
+R - radius of the sample in [cm]
+
+rv - radius of sensor in [cm]
+
+ri - inner radius of radiated surface in [cm]
+
+ro - outer radius of radiated surface in [cm]
+
+cp - sample heat capacity in [J / (g K)]
+
+rho - sample density in [g / cm^3]
+
 ## Algorithm
 
 The program calculates the values according to the formulas from Gembarovich, J., et al., "In-plane thermal diffusivity measurement of highly thermal conductive thin films by the flash method", 2018.

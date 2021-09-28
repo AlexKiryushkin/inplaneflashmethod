@@ -1,4 +1,4 @@
-# inplanefkashmethod
+# inplaneflashmethod
 
 This is the program for calculating the the thermal conductivity using in plane analytical model.
 
